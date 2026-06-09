@@ -1,0 +1,55 @@
+{
+  "name": "claude-traffic-light",
+  "displayName": "Claude Traffic Light",
+  "description": "状态栏红绿灯，实时反映 Claude Code 对话状态",
+  "version": "0.1.0",
+  "publisher": "fengjiong",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeTrafficLight.toggle",
+        "title": "Claude Traffic Light: 开关服务"
+      },
+      {
+        "command": "claudeTrafficLight.showStatus",
+        "title": "Claude Traffic Light: 查看状态"
+      }
+    ],
+    "configuration": {
+      "title": "Claude Traffic Light",
+      "properties": {
+        "claudeTrafficLight.port": {
+          "type": "number",
+          "default": 8080,
+          "description": "接收 Claude Code hook 事件的本地 HTTP 端口"
+        },
+        "claudeTrafficLight.idleResetSeconds": {
+          "type": "number",
+          "default": 0,
+          "description": "空闲多少秒后自动回到绿灯（0 表示禁用自动回落）"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.4.0"
+  }
+}
