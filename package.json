@@ -5,6 +5,7 @@
   "version": "0.6.0",
   "publisher": "fengjiong",
   "license": "MIT",
+  "icon": "index21.png",
   "engines": {
     "vscode": "^1.75.0"
   },

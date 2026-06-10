@@ -12,9 +12,9 @@ VSCode 扩展，实时反映 Claude Code 对话状态。三种界面同时呈现
 
 | 状态 | 颜色 | 触发时机 |
 |------|------|---------|
-| 空闲 | 绿 | 会话开始/结束 / 回合结束 / 空闲超时 |
-| 工作中 | 黄 | 用户提问 / 工具调用 / 子代理运行 |
-| 等你处理 | 红 | 权限请求 / `Notification` / 等用户输入（含 `AskUserQuestion`、`ExitPlanMode`） |
+| 空闲 | 🟢 绿 | 会话开始/结束 / 回合结束 / 空闲超时 |
+| 工作中 | 🟡 黄 | 用户提问 / 工具调用 / 子代理运行 |
+| 等你处理 | 🔴 红 | 权限请求 / `Notification` / 等用户输入（含 `AskUserQuestion`、`ExitPlanMode`） |
 
 权限弹窗通常没有 hook 触发。扩展用启发式补位：`PreToolUse` 后 N 秒未收到 `PostToolUse` 即判定卡在权限等待，灯转红。N 由 `claudeTrafficLight.permissionWaitSeconds` 控制。
 
