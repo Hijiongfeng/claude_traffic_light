@@ -1,0 +1,187 @@
+/*
+ * 共享的红绿灯本体样式。
+ * 侧边栏 webview 和 standalone 独立窗口都加载这一份,各自的"外壳"
+ * (整体大小、padding、close/pin 按钮等)在各自 HTML 内定义。
+ *
+ * 两处历史上的视觉差异(发光半径)通过 CSS 自定义属性暴露:
+ *   --glow-near / --glow-far: 灯亮起时的内/外发光半径
+ *   --container-padding:      .light-container 内边距
+ * 各自文件可在 :root 或 .traffic-light 上 override。
+ */
+:root {
+  --glow-near: 40px;
+  --glow-far: 80px;
+  --container-padding: 12%;
+}
+
+.light-container {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  /* 凹槽底色:中心更深,边缘渐变出"凹下去"的错觉 */
+  background:
+    radial-gradient(circle at 50% 45%,
+      #0a0c0e 0%,
+      #14171a 55%,
+      #1c2025 90%);
+  box-shadow:
+    /* 顶部吃光,模拟整体光从上方来 */
+    inset 0 7px 14px rgba(0,0,0,0.9),
+    inset 0 -3px 6px rgba(255,255,255,0.04),
+    /* 边缘细高光环,跟图标一致的金属感 */
+    inset 0 0 0 1px rgba(255,255,255,0.05),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--container-padding);
+}
+
+.light {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  position: relative;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  background: #0a0a0a;
+  box-shadow:
+    inset 0 4px 10px rgba(0,0,0,0.9),
+    inset 0 -2px 6px rgba(255,255,255,0.03),
+    0 2px 4px rgba(0,0,0,0.5);
+}
+
+/* 玻璃反光层:接近图标里那种弧形高光,核心几乎白热 */
+.light::before {
+  content: '';
+  position: absolute;
+  top: 6%;
+  left: 12%;
+  width: 55%;
+  height: 50%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 35% 30%,
+    rgba(255,255,255,0.95) 0%,
+    rgba(255,255,255,0.7)  20%,
+    rgba(255,255,255,0.35) 45%,
+    rgba(255,255,255,0.1)  70%,
+    transparent 90%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  filter: blur(0.5px);
+  pointer-events: none;
+}
+.light.active::before { opacity: 1; }
+
+/* 外层光晕:更宽、更柔,像真的灯泡在烤空气 */
+.light::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+
+/* 红灯:中段保持高饱和的朱红,边缘急转深红 */
+.light.red.active {
+  background:
+    radial-gradient(circle at 40% 35%,
+      #ffe0d8 0%,
+      #ff8866 8%,
+      #ff3322 22%,
+      #ee0a0a 42%,
+      #b00505 65%,
+      #5a0000 88%,
+      #2a0000 100%);
+  box-shadow:
+    0 0 calc(var(--glow-near) * 0.6) rgba(255,68,51,1),
+    0 0 var(--glow-near)              rgba(255,51,34,0.85),
+    0 0 var(--glow-far)               rgba(255,51,34,0.45),
+    inset 0 -6px 14px rgba(40,0,0,0.6),
+    inset 0 3px 8px  rgba(255,180,160,0.5);
+}
+.light.red.active::after {
+  opacity: 1;
+  background: radial-gradient(circle,
+    rgba(255,51,34,0.5)  0%,
+    rgba(255,51,34,0.25) 25%,
+    rgba(255,51,34,0.08) 55%,
+    transparent 85%);
+}
+
+/* 黄灯:橙金色调,中段暖而不糊 */
+.light.yellow.active {
+  background:
+    radial-gradient(circle at 40% 35%,
+      #fff8d8 0%,
+      #ffeb70 8%,
+      #ffd11a 22%,
+      #f5a000 45%,
+      #aa6600 70%,
+      #5a3200 90%,
+      #2a1800 100%);
+  box-shadow:
+    0 0 calc(var(--glow-near) * 0.6) rgba(255,210,40,1),
+    0 0 var(--glow-near)              rgba(255,200,30,0.9),
+    0 0 var(--glow-far)               rgba(255,200,30,0.5),
+    inset 0 -6px 14px rgba(40,20,0,0.6),
+    inset 0 3px 8px  rgba(255,240,180,0.6);
+}
+.light.yellow.active::after {
+  opacity: 1;
+  background: radial-gradient(circle,
+    rgba(255,210,40,0.55) 0%,
+    rgba(255,210,40,0.28) 25%,
+    rgba(255,210,40,0.08) 55%,
+    transparent 85%);
+}
+
+/* 绿灯:翠绿偏荧光,接近图标的"通电感" */
+.light.green.active {
+  background:
+    radial-gradient(circle at 40% 35%,
+      #e8ffe8 0%,
+      #88ffaa 8%,
+      #22ee55 22%,
+      #00bb33 45%,
+      #006622 70%,
+      #003011 90%,
+      #001508 100%);
+  box-shadow:
+    0 0 calc(var(--glow-near) * 0.6) rgba(40,255,100,1),
+    0 0 var(--glow-near)              rgba(34,238,80,0.9),
+    0 0 var(--glow-far)               rgba(34,238,80,0.5),
+    inset 0 -6px 14px rgba(0,30,10,0.6),
+    inset 0 3px 8px  rgba(180,255,200,0.55);
+}
+.light.green.active::after {
+  opacity: 1;
+  background: radial-gradient(circle,
+    rgba(34,238,80,0.55) 0%,
+    rgba(34,238,80,0.28) 25%,
+    rgba(34,238,80,0.08) 55%,
+    transparent 85%);
+}
+
+/* 熄灭态:磨砂玻璃感的暗灯,顶部留一丝微弱反光提示"它是个球",
+ *  亮起的那盏对比会更冲。*/
+.light:not(.active) {
+  background:
+    radial-gradient(circle at 40% 30%,
+      #2e3338 0%,
+      #1a1d20 35%,
+      #0a0c0e 75%,
+      #050608 100%);
+  opacity: 0.32;
+  box-shadow:
+    inset 0 5px 12px rgba(0,0,0,0.95),
+    inset 0 -2px 4px rgba(255,255,255,0.02);
+}
+.light:not(.active)::before {
+  /* 熄灭时也保留一点微弱的环境反光,让球体更立体 */
+  opacity: 0.08;
+}

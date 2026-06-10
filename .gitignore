@@ -5,6 +5,7 @@ node_modules/
 out/
 dist/
 *.tsbuildinfo
+*.vsix
 
 # 打包产物
 # *.vsix

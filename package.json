@@ -63,6 +63,11 @@
           "default": 1,
           "description": "PreToolUse 后多少秒内未收到 PostToolUse 即判定为等待权限/卡住，灯转红（0 表示禁用此启发式）"
         },
+        "claudeTrafficLight.verbose": {
+          "type": "boolean",
+          "default": false,
+          "description": "输出详细日志（每个 hook 事件都记录）。关闭时只记录角色切换、服务启停和错误，避免高频事件刷爆输出面板"
+        },
         "claudeTrafficLight.standaloneWindow.enabled": {
           "type": "boolean",
           "default": true,

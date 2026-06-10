@@ -60,7 +60,11 @@ let idleTimer: NodeJS.Timeout | undefined;
 let reelectTimer: NodeJS.Timeout | undefined;
 /** PreToolUse 后等 PostToolUse 的超时计时器:超时则判定在等权限,转红灯 */
 let permissionWaitTimer: NodeJS.Timeout | undefined;
-let stateWatcher: fs.FSWatcher | undefined;
+/** 是否已对 STATE_FILE 启用了 fs.watchFile 轮询,用于 stopClient 时正确取消 */
+let stateWatching = false;
+/** 服务端最近一次写共享文件的时间戳。watchFile 回调据此过滤"自己刚写"的事件,
+ *  作为 stopClient 之外的兜底,防止 server 角色短暂残留 watcher 时自触发。*/
+let lastSelfWriteTs = 0;
 let output: vscode.OutputChannel;
 let role: 'server' | 'client' | 'none' = 'none';
 let conflictReported = false;
@@ -75,20 +79,42 @@ let extensionPath: string = '';
 class TrafficLightViewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
 
+  constructor(private readonly extensionUri: vscode.Uri) {}
+
   resolveWebviewView(webviewView: vscode.WebviewView) {
     this.view = webviewView;
-    webviewView.webview.options = { enableScripts: true };
-    webviewView.webview.html = this.getHtml(currentState);
+    const mediaRoot = vscode.Uri.joinPath(this.extensionUri, 'media');
+    webviewView.webview.options = {
+      enableScripts: true,
+      // 锁定 webview 能访问的本地资源到 media/,防止以后误引入路径越权读取扩展其他文件
+      localResourceRoots: [mediaRoot],
+    };
+    webviewView.webview.html = this.getHtml(webviewView.webview, currentState);
   }
 
   updateState(state: LightState) {
     this.view?.webview.postMessage({ state });
   }
 
-  private getHtml(state: LightState): string {
+  private getHtml(webview: vscode.Webview, state: LightState): string {
+    const cssUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'traffic-light-base.css')
+    );
+    // CSP nonce 给页内 <script> 用,style-src 必须含 'unsafe-inline'(下方还有局部样式块)
+    const nonce = makeNonce();
+    const cspSource = webview.cspSource;
     return `<!DOCTYPE html>
 <html><head><meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${cspSource} data:;">
+<link rel="stylesheet" href="${cssUri}">
 <style>
+/* 侧边栏特有的发光半径(尺寸更大) */
+:root {
+  --glow-near: 40px;
+  --glow-far: 80px;
+  --container-padding: 12%;
+}
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   display: flex; justify-content: center; align-items: center;
@@ -121,145 +147,6 @@ body {
   border-radius: 4px;
   box-shadow: 0 1px 2px rgba(255,255,255,0.05);
 }
-.light-container {
-  width: 100%;
-  aspect-ratio: 1;
-  border-radius: 50%;
-  background: radial-gradient(circle at 50% 50%, #1a1d21 0%, #0d0f11 70%);
-  box-shadow:
-    inset 0 6px 12px rgba(0,0,0,0.8),
-    inset 0 -2px 4px rgba(255,255,255,0.02);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12%;
-}
-.light {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  position: relative;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  background: #0a0a0a;
-  box-shadow:
-    inset 0 4px 10px rgba(0,0,0,0.9),
-    inset 0 -2px 6px rgba(255,255,255,0.03),
-    0 2px 4px rgba(0,0,0,0.5);
-}
-/* 玻璃反光层 */
-.light::before {
-  content: '';
-  position: absolute;
-  top: 8%;
-  left: 15%;
-  width: 45%;
-  height: 45%;
-  border-radius: 50%;
-  background: radial-gradient(circle at 40% 40%,
-    rgba(255,255,255,0.6) 0%,
-    rgba(255,255,255,0.3) 30%,
-    transparent 70%);
-  opacity: 0;
-  transition: opacity 0.4s ease;
-  filter: blur(1px);
-}
-.light.active::before { opacity: 1; }
-
-/* 外层光晕 */
-.light::after {
-  content: '';
-  position: absolute;
-  top: -40%;
-  left: -40%;
-  width: 180%;
-  height: 180%;
-  border-radius: 50%;
-  opacity: 0;
-  transition: opacity 0.4s ease;
-  pointer-events: none;
-}
-
-.light.red.active {
-  background:
-    radial-gradient(circle at 45% 40%,
-      #ff5555 0%,
-      #ff3333 15%,
-      #ee1111 35%,
-      #cc0000 60%,
-      #880000 85%,
-      #440000 100%);
-  box-shadow:
-    0 0 40px rgba(255,51,51,0.8),
-    0 0 80px rgba(255,51,51,0.4),
-    inset 0 -4px 12px rgba(0,0,0,0.5),
-    inset 0 2px 6px rgba(255,85,85,0.6);
-}
-.light.red.active::after {
-  opacity: 1;
-  background: radial-gradient(circle,
-    rgba(255,51,51,0.4) 0%,
-    rgba(255,51,51,0.2) 30%,
-    rgba(255,51,51,0.05) 60%,
-    transparent 100%);
-}
-
-.light.yellow.active {
-  background:
-    radial-gradient(circle at 45% 40%,
-      #ffee44 0%,
-      #ffdd22 15%,
-      #ffcc00 35%,
-      #dd9900 60%,
-      #996600 85%,
-      #553300 100%);
-  box-shadow:
-    0 0 40px rgba(255,221,34,0.9),
-    0 0 80px rgba(255,221,34,0.5),
-    inset 0 -4px 12px rgba(0,0,0,0.5),
-    inset 0 2px 6px rgba(255,238,68,0.7);
-}
-.light.yellow.active::after {
-  opacity: 1;
-  background: radial-gradient(circle,
-    rgba(255,221,34,0.5) 0%,
-    rgba(255,221,34,0.25) 30%,
-    rgba(255,221,34,0.08) 60%,
-    transparent 100%);
-}
-
-.light.green.active {
-  background:
-    radial-gradient(circle at 45% 40%,
-      #44ff88 0%,
-      #22ff66 15%,
-      #00ee44 35%,
-      #00bb33 60%,
-      #007722 85%,
-      #003311 100%);
-  box-shadow:
-    0 0 40px rgba(34,255,102,0.9),
-    0 0 80px rgba(34,255,102,0.5),
-    inset 0 -4px 12px rgba(0,0,0,0.5),
-    inset 0 2px 6px rgba(68,255,136,0.7);
-}
-.light.green.active::after {
-  opacity: 1;
-  background: radial-gradient(circle,
-    rgba(34,255,102,0.5) 0%,
-    rgba(34,255,102,0.25) 30%,
-    rgba(34,255,102,0.08) 60%,
-    transparent 100%);
-}
-
-.light:not(.active) {
-  background:
-    radial-gradient(circle at 45% 40%,
-      #2a2a2a 0%,
-      #1a1a1a 40%,
-      #0d0d0d 100%);
-  opacity: 0.25;
-  box-shadow: inset 0 4px 10px rgba(0,0,0,0.95);
-}
 .label {
   margin-top: 8px;
   color: #6b7280;
@@ -285,7 +172,7 @@ body {
   </div>
   <div class="label" id="label"></div>
 </div>
-<script>
+<script nonce="${nonce}">
 const stateMap = {
   idle:  { light: 'green',  label: 'Ready' },
   busy:  { light: 'yellow', label: 'Working' },
@@ -304,11 +191,19 @@ window.addEventListener('message', e => { if (e.data.state) setState(e.data.stat
   }
 }
 
+/** 给 CSP 用的随机 nonce,32 字符 base64-ish */
+function makeNonce(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let s = '';
+  for (let i = 0; i < 32; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
 export function activate(context: vscode.ExtensionContext) {
   output = vscode.window.createOutputChannel('Claude Traffic Light');
   extensionPath = context.extensionPath;
 
-  trafficLightProvider = new TrafficLightViewProvider();
+  trafficLightProvider = new TrafficLightViewProvider(context.extensionUri);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('claudeTrafficLight.panel', trafficLightProvider)
   );
@@ -357,6 +252,21 @@ function getPort(): number {
   return vscode.workspace.getConfiguration('claudeTrafficLight').get<number>('port', 8080);
 }
 
+/**
+ * 统一日志出口。important=true 的消息(角色切换、服务启停、错误)总是输出;
+ * 其余的"逐事件"日志只有在 claudeTrafficLight.verbose 开启时才打,
+ * 避免连续 PostToolUse 等高频 hook 把输出面板刷爆。
+ */
+function logLine(msg: string, important = false) {
+  if (!important) {
+    const verbose = vscode.workspace
+      .getConfiguration('claudeTrafficLight')
+      .get<boolean>('verbose', false);
+    if (!verbose) return;
+  }
+  output.appendLine(msg);
+}
+
 /** 更新状态栏显示(不写文件) */
 function applyState(state: LightState) {
   currentState = state;
@@ -366,13 +276,23 @@ function applyState(state: LightState) {
   statusBarItem.tooltip = `Claude 状态: ${style.text}`;
   trafficLightProvider?.updateState(state);
 
+  armIdleTimerIfServer();
+}
+
+/**
+ * 按当前状态(重新)安排 idle 兜底倒计时。
+ * 只有 server 角色才倒计时:client 跟随 server 的广播即可,否则每个窗口各自
+ * 倒计时写文件,会形成多窗口竞写互相覆盖。
+ * 每次调用都会先清掉旧计时器,所以可以安全地重复调用——applyState 每次状态变化时
+ * 调一次,client 升格为 server 时也显式再调一次补注册。
+ */
+function armIdleTimerIfServer() {
   if (idleTimer) { clearTimeout(idleTimer); idleTimer = undefined; }
-  // idle 兜底只由 server 负责:client 跟随 server 的广播即可,
-  // 否则每个窗口都各自倒计时写文件,会形成多窗口竞写互相覆盖。
+  if (role !== 'server' || currentState === 'idle') return;
   const resetSec = vscode.workspace
     .getConfiguration('claudeTrafficLight')
     .get<number>('idleResetSeconds', 0);
-  if (resetSec > 0 && state !== 'idle' && role === 'server') {
+  if (resetSec > 0) {
     idleTimer = setTimeout(() => setStateAndBroadcast('idle'), resetSec * 1000);
   }
 }
@@ -380,10 +300,19 @@ function applyState(state: LightState) {
 /** 服务端收到事件:更新自己 + 写共享文件广播给其他窗口 */
 function setStateAndBroadcast(state: LightState) {
   applyState(state);
+  // 原子写:先写到同目录的临时文件,再 rename 覆盖。
+  // 同分区内 rename 是原子的,客户端读到的永远是完整 JSON,
+  // 多窗口并发写也只是"最后一个赢",不会交错出半截内容。
+  const ts = Date.now();
+  lastSelfWriteTs = ts;
+  // pid 进临时名,避免本进程与其他进程的临时文件互相覆盖
+  const tmp = `${STATE_FILE}.${process.pid}.tmp`;
   try {
-    fs.writeFileSync(STATE_FILE, JSON.stringify({ state, ts: Date.now() }));
+    fs.writeFileSync(tmp, JSON.stringify({ state, ts }));
+    fs.renameSync(tmp, STATE_FILE);
   } catch (e) {
-    output.appendLine(`写共享状态失败: ${e}`);
+    logLine(`写共享状态失败: ${e}`, true);
+    try { fs.unlinkSync(tmp); } catch { /* ignore */ }
   }
   pushSse({ state });
 }
@@ -410,22 +339,28 @@ function closeAllSseClients() {
   sseClients.clear();
 }
 
-/** 客户端/启动时:从共享文件读当前状态 */
+/** 客户端/启动时:从共享文件读当前状态并应用 */
 function readSharedState() {
+  const parsed = readSharedStateRaw();
+  if (parsed && parsed.state) applyState(parsed.state);
+}
+
+/** 只读不应用,返回 { state, ts } 或 null。watchFile 回调用这版本以便先比 ts。*/
+function readSharedStateRaw(): { state: LightState; ts: number } | null {
   try {
-    if (fs.existsSync(STATE_FILE)) {
-      const data = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-      if (data.state && STYLES[data.state as LightState]) {
-        applyState(data.state);
-      }
+    if (!fs.existsSync(STATE_FILE)) return null;
+    const data = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    if (data.state && STYLES[data.state as LightState]) {
+      return { state: data.state as LightState, ts: typeof data.ts === 'number' ? data.ts : 0 };
     }
-  } catch { /* 忽略 */ }
+  } catch { /* JSON 半截/被替换中,等下一次回调 */ }
+  return null;
 }
 
 function handleEvent(payload: any) {
   const eventName = payload?.hook_event_name ?? payload?.event;
   if (typeof eventName !== 'string') {
-    output.appendLine(`[${new Date().toLocaleTimeString()}] 收到无效 payload`);
+    logLine(`[${new Date().toLocaleTimeString()}] 收到无效 payload`);
     return;
   }
   let state = EVENT_MAP[eventName];
@@ -435,14 +370,17 @@ function handleEvent(payload: any) {
     state = 'error';
   }
   const detail = payload.tool_name ? ` (${payload.tool_name})` : '';
-  output.appendLine(`[${new Date().toLocaleTimeString()}] ${eventName}${detail} → ${state ?? '(未映射)'}`);
+  logLine(`[${new Date().toLocaleTimeString()}] ${eventName}${detail} → ${state ?? '(未映射)'}`);
   if (state) setStateAndBroadcast(state);
 
   // 权限弹窗启发式:Kiro IDE 等环境的"Allow this bash command?"弹窗不触发任何 hook,
   // 但表现为 PreToolUse 之后迟迟不来 PostToolUse。借此推断"卡在权限等待":
   // PreToolUse 启动计时器,N 秒内若 PostToolUse 没来则切红灯;
-  // PostToolUse 到了就取消计时器。USER_INPUT_TOOLS 已经直接红了,无需再走这里。
+  // PostToolUse 到了就取消计时器。
   if (permissionWaitTimer) { clearTimeout(permissionWaitTimer); permissionWaitTimer = undefined; }
+  // 注意 state === 'busy' 这个条件:USER_INPUT_TOOLS(AskUserQuestion/ExitPlanMode)
+  // 在上面已经被改成 'error',所以不会进这里——它们本就是"等用户",不需要再靠超时推断。
+  // 只有普通工具(state 仍为 busy)才需要这个"迟迟没 PostToolUse → 可能卡在权限弹窗"的兜底。
   if (eventName === 'PreToolUse' && state === 'busy') {
     const waitSec = vscode.workspace
       .getConfiguration('claudeTrafficLight')
@@ -457,23 +395,45 @@ function handleEvent(payload: any) {
   }
 }
 
-/** 客户端模式:监听共享文件变化,跟随服务端更新状态栏 */
+/** 客户端模式:监听共享文件变化,跟随服务端更新状态栏。
+ *  server 角色不需要(也不应该)监听:自己写自己读会让 idleTimer 等副作用反复重置。
+ *  用 fs.watchFile 而不是 fs.watch:Linux 上 fs.watch 在文件被 rename 替换后会失效,
+ *  且经常丢事件;轮询虽多耗一点点 CPU,但跨平台稳定。*/
 function startClient() {
   stopClient();
   if (role !== 'server') role = 'client';
+  if (role === 'server') return; // 防御:server 不该走到这里
   try {
     if (!fs.existsSync(STATE_FILE)) {
-      fs.writeFileSync(STATE_FILE, JSON.stringify({ state: currentState, ts: Date.now() }));
+      // 首次启动,直接写一份初始状态。这一次也算"自己写",记下 ts。
+      const ts = Date.now();
+      lastSelfWriteTs = ts;
+      const tmp = `${STATE_FILE}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify({ state: currentState, ts }));
+      fs.renameSync(tmp, STATE_FILE);
     }
-    stateWatcher = fs.watch(STATE_FILE, () => readSharedState());
-    output.appendLine('客户端模式: 正在监听共享状态文件');
+    fs.watchFile(STATE_FILE, { interval: 500 }, (curr, prev) => {
+      // mtime 没变就是 watchFile 的空心跳,跳过
+      if (curr.mtimeMs === prev.mtimeMs) return;
+      const parsed = readSharedStateRaw();
+      if (!parsed) return;
+      // 是 server 自己刚写的就跳过——避免 server→client 转换瞬间残留 watcher
+      // 误把自己的写当成"对端广播"再 apply 一次。
+      if (parsed.ts && parsed.ts === lastSelfWriteTs) return;
+      applyState(parsed.state);
+    });
+    stateWatching = true;
+    logLine('客户端模式: 正在轮询共享状态文件 (fs.watchFile)', true);
   } catch (e) {
-    output.appendLine(`监听共享文件失败: ${e}`);
+    logLine(`监听共享文件失败: ${e}`, true);
   }
 }
 
 function stopClient() {
-  if (stateWatcher) { stateWatcher.close(); stateWatcher = undefined; }
+  if (stateWatching) {
+    try { fs.unwatchFile(STATE_FILE); } catch { /* ignore */ }
+    stateWatching = false;
+  }
 }
 
 /**
@@ -518,7 +478,7 @@ function tryBecomeServer(aggressive = false) {
     if (req.method === 'POST' && req.url === '/__yield') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'yielding' }));
-      output.appendLine('收到 /__yield 请求,让位给新实例');
+      logLine('收到 /__yield 请求,让位给新实例', true);
       stopServer();
       startClient();
       // 让位后也调度一次回选:万一发起 yield 的实例自己崩了/没绑成,本窗口能再接管。
@@ -539,7 +499,7 @@ function tryBecomeServer(aggressive = false) {
             return;
           }
         } catch (e) {
-          output.appendLine(`解析失败: ${e}`);
+          logLine(`解析失败: ${e}`, true);
         }
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'error' }));
@@ -564,10 +524,10 @@ function tryBecomeServer(aggressive = false) {
     stopClient();
     conflictReported = false;
     if (reelectTimer) { clearTimeout(reelectTimer); reelectTimer = undefined; }
-    // 刚从 client 升为 server:若当前是非 idle 态,补注册一次 idle 兜底
-    // (client 角色时 applyState 不会注册,见 applyState 内的 role 判断)。
-    applyState(currentState);
-    output.appendLine(`服务端模式: http://127.0.0.1:${port}/api/v1/event`);
+    // 刚从 client 升为 server:补注册一次 idle 兜底
+    // (client 角色时 armIdleTimerIfServer 因 role 检查不会注册)。
+    armIdleTimerIfServer();
+    logLine(`服务端模式: http://127.0.0.1:${port}/api/v1/event`, true);
     startStandaloneWindow();
   });
 }
@@ -584,7 +544,7 @@ function probeOccupant(port: number, aggressive: boolean) {
           conflictReported = false;
           if (aggressive) {
             // 让现任 server 主动让位,然后重试绑定
-            output.appendLine('端口被本插件另一窗口占用,发送 /__yield 顶替');
+            logLine('端口被本插件另一窗口占用,发送 /__yield 顶替', true);
             yieldOccupantAndRetake(port);
           } else {
             role = 'client';
@@ -592,7 +552,7 @@ function probeOccupant(port: number, aggressive: boolean) {
             // 占端口的是本插件的另一个窗口。安静当 client,但定期回头竞选:
             // 一旦那个 server 窗口关闭、端口释放,本窗口就能接管,hook 不中断。
             scheduleReelection(5000);
-            output.appendLine('端口已被本插件的另一个窗口占用,本窗口转为客户端(文件同步),指示灯正常工作');
+            logLine('端口已被本插件的另一个窗口占用,本窗口转为客户端(文件同步),指示灯正常工作', true);
           }
           return;
         }
@@ -618,7 +578,7 @@ function yieldOccupantAndRetake(port: number) {
   });
   req.on('error', () => {
     // 老版本可能没有 /__yield 端点;退回到普通客户端 + 慢轮询
-    output.appendLine('对方不响应 /__yield(可能是旧版本),退回客户端模式');
+    logLine('对方不响应 /__yield(可能是旧版本),退回客户端模式', true);
     role = 'client';
     startClient();
     scheduleReelection(5000);
@@ -634,7 +594,7 @@ function yieldOccupantAndRetake(port: number) {
 
 /** 端口被非本插件的程序占用 → 报错(仅一次),并定期重试 */
 function reportPortConflict(port: number) {
-  output.appendLine(`端口 ${port} 被其他程序占用`);
+  logLine(`端口 ${port} 被其他程序占用`, true);
   // 只在首次冲突时弹窗,避免周期性重试反复打扰用户。
   if (!conflictReported) {
     conflictReported = true;
@@ -661,7 +621,7 @@ function stopServer() {
     server.close();
     server = undefined;
     role = 'none';
-    output.appendLine('服务端已停止');
+    logLine('服务端已停止', true);
   }
   closeAllSseClients();
   stopStandaloneWindow();
@@ -688,17 +648,17 @@ function startStandaloneWindow() {
       // electron 包默认导出二进制路径
       electronBin = require(path.join(extensionPath, 'node_modules', 'electron')) as string;
     } catch (e) {
-      output.appendLine(`无法定位 Electron 二进制: ${e}`);
+      logLine(`无法定位 Electron 二进制: ${e}`, true);
       return;
     }
   }
   const mainJs = path.join(extensionPath, 'standalone', 'main.js');
   if (!fs.existsSync(mainJs)) {
-    output.appendLine(`找不到 standalone 入口: ${mainJs}`);
+    logLine(`找不到 standalone 入口: ${mainJs}`, true);
     return;
   }
   if (!fs.existsSync(electronBin)) {
-    output.appendLine(`Electron 二进制不存在: ${electronBin}`);
+    logLine(`Electron 二进制不存在: ${electronBin}`, true);
     return;
   }
 
@@ -733,16 +693,16 @@ function startStandaloneWindow() {
       detached: false,
       env: childEnv,
     });
-    proc.stdout?.on('data', (d) => output.appendLine(`[standalone] ${String(d).trimEnd()}`));
-    proc.stderr?.on('data', (d) => output.appendLine(`[standalone:err] ${String(d).trimEnd()}`));
+    proc.stdout?.on('data', (d) => logLine(`[standalone] ${String(d).trimEnd()}`));
+    proc.stderr?.on('data', (d) => logLine(`[standalone:err] ${String(d).trimEnd()}`, true));
     proc.on('exit', (code, signal) => {
-      output.appendLine(`独立窗口进程退出 code=${code} signal=${signal}`);
+      logLine(`独立窗口进程退出 code=${code} signal=${signal}`, true);
       if (standaloneProc === proc) standaloneProc = undefined;
     });
     standaloneProc = proc;
-    output.appendLine('独立窗口已启动');
+    logLine('独立窗口已启动', true);
   } catch (e) {
-    output.appendLine(`启动独立窗口失败: ${e}`);
+    logLine(`启动独立窗口失败: ${e}`, true);
   }
 }
 
