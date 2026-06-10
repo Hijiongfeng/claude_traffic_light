@@ -17,7 +17,7 @@
 html, body {
   width: 100%;
   height: 100%;
-  background: transparent;
+  background: transparent;  /* 整个窗口透明 */
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   user-select: none;
@@ -27,7 +27,7 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 8px;
+  /* 删掉 padding: 8px; 让灯箱贴边,避免周围留出灰底 */
 }
 
 /* The whole frame is draggable; interactive bits opt out via no-drag. */
@@ -38,17 +38,15 @@ body {
   align-items: center;
   width: 100%;
   height: 100%;
-  padding: 26px 18px 22px;
-  /* 软糖式圆角:足够大才有"squircle"感,接近图标里的造型 */
-  border-radius: 32%/12%;
+  padding: 28px 0 8px;  /* 顶部留28px给按钮,左右0让灯箱贴边,底部只留8px */
+  /* 软糖式圆角:改小一点,让轮廓更贴合内容 */
+  border-radius: 28%/10%;
   background:
     /* 主体渐变:顶亮底暗,模拟从上方打来的环境光 */
     radial-gradient(ellipse at 50% -20%, #3a4148 0%, transparent 55%),
     linear-gradient(180deg, #262b30 0%, #1a1d22 35%, #101216 75%, #07090b 100%);
   box-shadow:
-    /* 外部投影:大、柔、压向桌面 */
-    0 30px 60px rgba(0,0,0,0.7),
-    0 12px 24px rgba(0,0,0,0.5),
+    /* 删掉外部投影（那两行 0 30px / 0 12px），只保留 inset 塑造立体感 */
     /* 顶部细高光环:模拟曲面边缘的反光 */
     inset 0 2px 0 rgba(255,255,255,0.12),
     inset 0 4px 8px rgba(255,255,255,0.04),
@@ -57,7 +55,7 @@ body {
     inset 0 -2px 0 rgba(0,0,0,0.5),
     /* 边缘 1px 描边,提升精致感 */
     inset 0 0 0 1px rgba(255,255,255,0.04);
-  gap: 16px;
+  gap: 10px;  /* 灯之间的间距缩小,让整体更紧凑 */
   position: relative;
   /* 加一个微妙的整体过渡,鼠标 hover 时(后面可加效果)更平滑 */
   transition: box-shadow 0.3s ease;

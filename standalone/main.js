@@ -97,7 +97,10 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'window.html'));
   mainWindow.once('ready-to-show', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      applyRoundedShape();
+    }
   });
 
   const persistBounds = () => {
@@ -106,12 +109,62 @@ function createWindow() {
     saveBounds(bounds);
   };
   mainWindow.on('move', persistBounds);
-  mainWindow.on('resize', persistBounds);
+  mainWindow.on('resize', () => {
+    persistBounds();
+    applyRoundedShape(); // 缩放后重算窗口形状,保持圆角贴合
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = undefined;
     app.quit();
   });
+}
+
+// 用一组矩形近似 CSS 里的软糖圆角 (border-radius 28%/10%)，
+// 让窗口形状贴合黑色灯箱轮廓,裁掉四角透明区域。
+// 注:setShape 只接受矩形,圆角靠分层矩形阶梯近似——层数越多越平滑。
+function applyRoundedShape() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  // setShape 用的是物理像素;在高 DPI 屏上要乘以缩放因子,否则形状会偏小
+  const { width: w, height: h } = mainWindow.getBounds();
+  const sf = screen.getDisplayMatching(mainWindow.getBounds()).scaleFactor || 1;
+  const W = Math.round(w * sf);
+  const H = Math.round(h * sf);
+  const rX = Math.round(W * 0.28); // 横向圆角半径
+  const rY = Math.round(H * 0.10); // 纵向圆角半径
+  const STEPS = 32;                // 圆角阶梯层数,越大越圆滑
+
+  const shapes = [];
+  const stepH = rY / STEPS;
+
+  // 顶部圆角:每层是一个有高度的矩形条,横向按四分之一椭圆收缩
+  for (let i = 0; i < STEPS; i++) {
+    const yTop = Math.floor(i * stepH);
+    const yBot = Math.floor((i + 1) * stepH);
+    // 椭圆方程:在高度 progress 处的横向 inset
+    const t = 1 - (i + 0.5) / STEPS;             // 1→0
+    const xInset = Math.round(rX * (1 - Math.sqrt(1 - t * t)));
+    shapes.push({ x: xInset, y: yTop, width: W - 2 * xInset, height: Math.max(1, yBot - yTop) });
+  }
+
+  // 中间主体:满宽
+  shapes.push({ x: 0, y: rY, width: W, height: H - 2 * rY });
+
+  // 底部圆角:镜像顶部
+  for (let i = 0; i < STEPS; i++) {
+    const yTop = H - rY + Math.floor(i * stepH);
+    const yBot = H - rY + Math.floor((i + 1) * stepH);
+    const t = (i + 0.5) / STEPS;                 // 0→1
+    const xInset = Math.round(rX * (1 - Math.sqrt(1 - t * t)));
+    shapes.push({ x: xInset, y: yTop, width: W - 2 * xInset, height: Math.max(1, yBot - yTop) });
+  }
+
+  try {
+    mainWindow.setShape(shapes);
+  } catch (e) {
+    // setShape 在部分 Linux WM / 缺少合成器时不支持,失败就退回方形窗口(背景已透明,影响不大)
+    console.error('setShape 不支持,保持方形窗口:', e.message);
+  }
 }
 
 // Renderer asks main to close the window via IPC.
