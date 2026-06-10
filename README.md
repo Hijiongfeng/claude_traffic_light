@@ -45,12 +45,82 @@ code --install-extension claude-traffic-light-0.6.0.vsix
 
 ## 配置 Claude Code Hook
 
-在 `~/.claude/settings.json` 中为想反映状态的事件挂上 hook：
+在 `~/.claude/settings.json` 中为想反映状态的事件挂上 hook。把下面的完整 `hooks` 块复制粘贴进去（如果已有其他 hook，合并到一起）：
 
 ```json
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "p=$(cat); curl -s -m 1 -X POST http://localhost:8080/api/v1/event -H 'Content-Type: application/json' -d \"$p\""
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "p=$(cat); curl -s -m 1 -X POST http://localhost:8080/api/v1/event -H 'Content-Type: application/json' -d \"$p\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "p=$(cat); curl -s -m 1 -X POST http://localhost:8080/api/v1/event -H 'Content-Type: application/json' -d \"$p\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "p=$(cat); curl -s -m 1 -X POST http://localhost:8080/api/v1/event -H 'Content-Type: application/json' -d \"$p\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "p=$(cat); curl -s -m 1 -X POST http://localhost:8080/api/v1/event -H 'Content-Type: application/json' -d \"$p\""
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "p=$(cat); curl -s -m 1 -X POST http://localhost:8080/api/v1/event -H 'Content-Type: application/json' -d \"$p\""
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "p=$(cat); curl -s -m 1 -X POST http://localhost:8080/api/v1/event -H 'Content-Type: application/json' -d \"$p\""
+          }
+        ]
+      }
+    ],
+    "Notification": [
       {
         "hooks": [
           {
@@ -64,9 +134,7 @@ code --install-extension claude-traffic-light-0.6.0.vsix
 }
 ```
 
-把同样的 hook 块复制给以下事件：`SessionStart`、`SessionEnd`、`Stop`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`SubagentStop`、`Notification`。
-
-`p=$(cat)` 把 hook 的完整 stdin payload 透传过来——里面带有 `tool_name` 等字段，扩展据此识别 `AskUserQuestion` 等"等待用户"工具，把灯切红。
+`p=$(cat)` 把 hook 的完整 stdin payload 透传过来——里面带有 `hook_event_name`、`tool_name` 等字段，扩展据此识别 `AskUserQuestion` / `ExitPlanMode` 等"等待用户"工具，把灯直接切红。
 
 ## 设置
 
@@ -75,6 +143,7 @@ code --install-extension claude-traffic-light-0.6.0.vsix
 | `claudeTrafficLight.port` | `8080` | 接收 hook 事件的本地端口 |
 | `claudeTrafficLight.idleResetSeconds` | `0` | 空闲多少秒后自动回绿灯（`0` = 禁用）。仅 server 角色生效，避免多窗口竞写 |
 | `claudeTrafficLight.permissionWaitSeconds` | `1` | `PreToolUse` 后多少秒未收到 `PostToolUse` 即判定等待权限，灯转红（`0` = 禁用此启发式） |
+| `claudeTrafficLight.verbose` | `false` | 输出详细日志（每个 hook 事件都记录）。关闭时只记录角色切换、服务启停和错误，避免高频事件刷爆输出面板 |
 | `claudeTrafficLight.standaloneWindow.enabled` | `true` | 是否启用独立小窗口 |
 | `claudeTrafficLight.standaloneWindow.alwaysOnTop` | `true` | 独立窗口启动时是否置顶。运行时可点窗口右上角图钉切换 |
 | `claudeTrafficLight.standaloneWindow.display` | `""` | X server 的 DISPLAY，例如 `10.0.0.1:0`。留空继承 extension host 的 `DISPLAY`。仅 Linux/远程容器场景需要 |
@@ -101,7 +170,9 @@ code --install-extension claude-traffic-light-0.6.0.vsix
 只有一个窗口能绑 `8080`，所以多窗口之间需要协调：
 
 - **server**：绑住端口的窗口，直接接收 hook 事件，把状态写到 `os.tmpdir()/claude-traffic-light-state.json`，并通过 SSE 推送给独立窗口
-- **client**：监听共享文件，被动跟随 server
+- **client**：轮询共享文件（`fs.watchFile`），被动跟随 server
+
+共享文件采用**原子写**（先写 `*.tmp` 再 `rename` 覆盖），保证 client 永远读到完整 JSON、并发写也不会交错。server 角色不监听自身写入的文件，避免自触发把空闲倒计时反复重置。client 用 `fs.watchFile` 轮询而非 `fs.watch`——后者在 Linux 上文件被 `rename` 替换后会失效、且经常丢事件。
 
 新窗口激活时主动发 `POST /__yield` 让现任 server 让位——保证"最近 reload 的窗口"成为 server，不需要手动清理僵尸进程。独立窗口随 server 走：旧 server 让位时关掉自己的窗口，新 server 起一个新的。
 
@@ -113,10 +184,14 @@ code --install-extension claude-traffic-light-0.6.0.vsix
 npm install
 npm run compile           # 一次性编译
 npm run watch             # 增量编译
-npx vsce package          # 打成 vsix
+npx vsce package          # 打成 vsix（含 Electron，约 110 MB）
 ```
 
-按 `F5` 启动 Extension Development Host 调试。`.vscode/launch.json` 已配好 `CLAUDE_TRAFFIC_LIGHT_ELECTRON_DIST` 环境变量，应对扩展工作目录在网络文件系统上跑不动 Electron 二进制的情况。
+按 `F5` 启动 Extension Development Host 调试，`.vscode/launch.json` 会先跑 `npm: watch` 后台任务再拉起调试窗口；改完 `src/*.ts` 后在调试窗口执行 `Developer: Reload Window` 即可刷新。
+
+> `.vscode/` 已在 `.gitignore` 中，clone 后本地没有 `launch.json` / `tasks.json`，需自行生成或让工具补齐。
+
+界面样式抽取在 [`media/traffic-light-base.css`](media/traffic-light-base.css)，侧边栏 webview 与独立窗口共用这一份灯样式；各自的外壳尺寸通过 `--glow-near` / `--glow-far` / `--container-padding` 这几个 CSS 变量微调。
 
 ## 开源协议
 
