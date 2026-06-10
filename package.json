@@ -2,7 +2,7 @@
   "name": "claude-traffic-light",
   "displayName": "Claude Traffic Light",
   "description": "状态栏红绿灯，实时反映 Claude Code 对话状态",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "publisher": "fengjiong",
   "license": "MIT",
   "engines": {
@@ -16,6 +16,24 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claude-traffic-light",
+          "title": "Claude Traffic Light",
+          "icon": "$(symbol-color)"
+        }
+      ]
+    },
+    "views": {
+      "claude-traffic-light": [
+        {
+          "type": "webview",
+          "id": "claudeTrafficLight.panel",
+          "name": "Traffic Light"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "claudeTrafficLight.toggle",
@@ -38,18 +56,47 @@
           "type": "number",
           "default": 0,
           "description": "空闲多少秒后自动回到绿灯（0 表示禁用自动回落）"
+        },
+        "claudeTrafficLight.permissionWaitSeconds": {
+          "type": "number",
+          "default": 1,
+          "description": "PreToolUse 后多少秒内未收到 PostToolUse 即判定为等待权限/卡住，灯转红（0 表示禁用此启发式）"
+        },
+        "claudeTrafficLight.standaloneWindow.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "启用独立的红绿灯小窗口（关闭后只显示侧边栏面板和状态栏）"
+        },
+        "claudeTrafficLight.standaloneWindow.alwaysOnTop": {
+          "type": "boolean",
+          "default": true,
+          "description": "独立窗口是否始终置顶"
+        },
+        "claudeTrafficLight.standaloneWindow.display": {
+          "type": "string",
+          "default": "",
+          "description": "Remote 容器场景下指定 X server 的 DISPLAY，例如 10.0.0.1:0。留空则继承 extension host 的 DISPLAY"
+        },
+        "claudeTrafficLight.standaloneWindow.electronDistOverride": {
+          "type": "string",
+          "default": "",
+          "description": "可选：指向另一份 Electron dist 目录。用于 extension 装在不可执行二进制的网络/特殊文件系统时，把 dist 副本放到本地盘。环境变量 CLAUDE_TRAFFIC_LIGHT_ELECTRON_DIST 优先级更高"
         }
       }
     }
   },
   "scripts": {
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
+    "compile": "node ./node_modules/typescript/lib/tsc.js -p ./",
+    "watch": "node ./node_modules/typescript/lib/tsc.js -watch -p ./",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.75.0",
+    "@vscode/vsce": "^3.9.2",
     "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "electron": "^41.7.1"
   }
 }

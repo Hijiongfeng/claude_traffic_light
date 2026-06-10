@@ -12,9 +12,11 @@ dist/
 # 编辑器 / 系统
 .vscode/
 .vscode-test/
+.claude/
 .DS_Store
 Thumbs.db
 
 # 日志
 *.log
 npm-debug.log*
+CLAUDE*

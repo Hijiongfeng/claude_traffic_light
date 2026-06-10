@@ -1,6 +1,7 @@
 .vscode/**
 src/**
 node_modules/**
+!node_modules/electron/**
 tsconfig.json
 out/**/*.map
 **/*.ts
@@ -8,3 +9,6 @@ out/**/*.map
 **/*.png
 **/*.jpg
 *.vsix
+plan.md
+CLAUDE.md
+.claude/**

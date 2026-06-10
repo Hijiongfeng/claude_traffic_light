@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Claude Traffic Light</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+body {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px;
+}
+
+/* The whole frame is draggable; interactive bits opt out via no-drag. */
+.traffic-light {
+  -webkit-app-region: drag;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 22px 16px 18px;
+  border-radius: 36px;
+  background:
+    linear-gradient(135deg, #2b3137 0%, #1e2228 30%, #151719 70%, #0f1113 100%);
+  box-shadow:
+    0 24px 60px rgba(0,0,0,0.85),
+    inset 0 2px 4px rgba(255,255,255,0.08),
+    inset 0 -4px 12px rgba(0,0,0,0.6);
+  border: 3px solid #242930;
+  gap: 14px;
+  position: relative;
+}
+.traffic-light::before {
+  content: '';
+  position: absolute;
+  top: 8px; left: 50%;
+  transform: translateX(-50%);
+  width: 40%;
+  height: 6px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
+  border-radius: 4px;
+}
+
+.close-btn {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255,255,255,0.08);
+  color: #888;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  z-index: 10;
+  padding: 0;
+}
+.close-btn:hover {
+  background: #ff5555;
+  color: #fff;
+}
+
+.pin-btn {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  top: 8px;
+  right: 32px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255,255,255,0.08);
+  color: #888;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  z-index: 10;
+  padding: 0;
+}
+.pin-btn:hover {
+  background: rgba(255,255,255,0.16);
+  color: #ddd;
+}
+.pin-btn.active {
+  background: rgba(255,221,68,0.18);
+  color: #ffdd44;
+}
+.pin-btn.active:hover {
+  background: rgba(255,221,68,0.3);
+}
+.pin-btn svg {
+  display: block;
+  transition: transform 0.2s ease;
+}
+.pin-btn.active svg {
+  transform: rotate(-30deg);
+}
+
+.light-container {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  aspect-ratio: 1;
+  max-height: calc((100% - 28px) / 3);
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, #1a1d21 0%, #0d0f11 70%);
+  box-shadow:
+    inset 0 6px 12px rgba(0,0,0,0.8),
+    inset 0 -2px 4px rgba(255,255,255,0.02);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10%;
+}
+.light {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  position: relative;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  background: #0a0a0a;
+  box-shadow:
+    inset 0 4px 10px rgba(0,0,0,0.9),
+    inset 0 -2px 6px rgba(255,255,255,0.03),
+    0 2px 4px rgba(0,0,0,0.5);
+}
+.light::before {
+  content: '';
+  position: absolute;
+  top: 8%;
+  left: 15%;
+  width: 45%;
+  height: 45%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 40%,
+    rgba(255,255,255,0.6) 0%,
+    rgba(255,255,255,0.3) 30%,
+    transparent 70%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  filter: blur(1px);
+}
+.light.active::before { opacity: 1; }
+.light::after {
+  content: '';
+  position: absolute;
+  top: -40%;
+  left: -40%;
+  width: 180%;
+  height: 180%;
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+
+.light.red.active {
+  background:
+    radial-gradient(circle at 45% 40%,
+      #ff5555 0%, #ff3333 15%, #ee1111 35%,
+      #cc0000 60%, #880000 85%, #440000 100%);
+  box-shadow:
+    0 0 30px rgba(255,51,51,0.8),
+    0 0 60px rgba(255,51,51,0.4),
+    inset 0 -4px 12px rgba(0,0,0,0.5),
+    inset 0 2px 6px rgba(255,85,85,0.6);
+}
+.light.red.active::after {
+  opacity: 1;
+  background: radial-gradient(circle,
+    rgba(255,51,51,0.4) 0%, rgba(255,51,51,0.2) 30%,
+    rgba(255,51,51,0.05) 60%, transparent 100%);
+}
+
+.light.yellow.active {
+  background:
+    radial-gradient(circle at 45% 40%,
+      #ffee44 0%, #ffdd22 15%, #ffcc00 35%,
+      #dd9900 60%, #996600 85%, #553300 100%);
+  box-shadow:
+    0 0 30px rgba(255,221,34,0.9),
+    0 0 60px rgba(255,221,34,0.5),
+    inset 0 -4px 12px rgba(0,0,0,0.5),
+    inset 0 2px 6px rgba(255,238,68,0.7);
+}
+.light.yellow.active::after {
+  opacity: 1;
+  background: radial-gradient(circle,
+    rgba(255,221,34,0.5) 0%, rgba(255,221,34,0.25) 30%,
+    rgba(255,221,34,0.08) 60%, transparent 100%);
+}
+
+.light.green.active {
+  background:
+    radial-gradient(circle at 45% 40%,
+      #44ff88 0%, #22ff66 15%, #00ee44 35%,
+      #00bb33 60%, #007722 85%, #003311 100%);
+  box-shadow:
+    0 0 30px rgba(34,255,102,0.9),
+    0 0 60px rgba(34,255,102,0.5),
+    inset 0 -4px 12px rgba(0,0,0,0.5),
+    inset 0 2px 6px rgba(68,255,136,0.7);
+}
+.light.green.active::after {
+  opacity: 1;
+  background: radial-gradient(circle,
+    rgba(34,255,102,0.5) 0%, rgba(34,255,102,0.25) 30%,
+    rgba(34,255,102,0.08) 60%, transparent 100%);
+}
+
+.light:not(.active) {
+  background:
+    radial-gradient(circle at 45% 40%,
+      #2a2a2a 0%, #1a1a1a 40%, #0d0d0d 100%);
+  opacity: 0.25;
+  box-shadow: inset 0 4px 10px rgba(0,0,0,0.95);
+}
+</style>
+</head>
+<body>
+<div class="traffic-light">
+  <button class="pin-btn" id="pinBtn" title="置顶">
+    <svg viewBox="0 0 24 24" fill="currentColor" width="10" height="10" aria-hidden="true">
+      <path d="M16 9V4l1-1V2H7v1l1 1v5l-2 3v1h5v6l1 1 1-1v-6h5v-1z"/>
+    </svg>
+  </button>
+  <button class="close-btn" id="closeBtn" title="关闭">×</button>
+  <div class="light-container"><div class="light red" id="red"></div></div>
+  <div class="light-container"><div class="light yellow" id="yellow"></div></div>
+  <div class="light-container"><div class="light green" id="green"></div></div>
+</div>
+<script>
+const stateMap = {
+  idle:  'green',
+  busy:  'yellow',
+  error: 'red'
+};
+function setState(s) {
+  const which = stateMap[s] || 'green';
+  document.querySelectorAll('.light').forEach(el => el.classList.remove('active'));
+  const target = document.getElementById(which);
+  if (target) target.classList.add('active');
+}
+setState('idle');
+
+const pinBtn = document.getElementById('pinBtn');
+function reflectPin(state) {
+  pinBtn.classList.toggle('active', !!state);
+  pinBtn.title = state ? '已置顶（点击取消）' : '点击置顶';
+}
+
+if (window.electronAPI) {
+  window.electronAPI.onStateUpdate((data) => {
+    if (data && data.state) setState(data.state);
+  });
+  window.electronAPI.getPinState().then(reflectPin).catch(() => {});
+}
+
+pinBtn.addEventListener('click', async () => {
+  if (!window.electronAPI) return;
+  try {
+    const next = await window.electronAPI.togglePin();
+    reflectPin(next);
+  } catch { /* ignore */ }
+});
+
+document.getElementById('closeBtn').addEventListener('click', () => {
+  if (window.electronAPI) window.electronAPI.closeWindow();
+});
+</script>
+</body>
+</html>
